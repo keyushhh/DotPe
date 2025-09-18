@@ -48,8 +48,20 @@ TWILIO_ACCOUNT_SID=your_twilio_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_PHONE_NUMBER=your_twilio_number
 
-3. Run the project
+## Project setup
+
+Clone the repo and move into the API folder:
+
+```bash
+git clone https://github.com/keyushhh/DotPe.git
+cd DotPe/dotpe-api
+
+Install dependencies:
+pnpm install
+
+Run the project (development)
 pnpm run start:dev
+
 
 🔑 API Endpoints
 Send OTP
@@ -77,10 +89,19 @@ Made with ❤️ for the DotPe project.
 
 ### Step 3 — Save the file  
 
-Then in PowerShell:
+Run the project (production build)
+pnpm run build
+pnpm run start:prod
+
+---
+
+### Step 1 — Open `README.md` in VS Code.  
+### Step 2 — Replace the old “setup/run” with the above.  
+### Step 3 — Save, then commit & push:
 
 ```powershell
 git add README.md
-git commit -m "docs: add custom README"
+git commit -m "docs: update setup instructions for dotpe-api folder"
 git push
+
 
