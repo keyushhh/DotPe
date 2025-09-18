@@ -1,4 +1,12 @@
-# 🚀 OTP API with NestJS + Twilio
+# OTP API with NestJS + Twilio 📲
+
+[![NestJS](https://img.shields.io/badge/NestJS-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)](https://nestjs.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Twilio](https://img.shields.io/badge/Twilio-F22F46?style=for-the-badge&logo=twilio&logoColor=white)](https://www.twilio.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+
+---
+
 
 This is a simple OTP (One-Time Password) authentication service built with **NestJS**.  
 It supports sending OTPs via **SMS** using [Twilio](https://www.twilio.com/), and verifying them securely.
