@@ -1,6 +1,8 @@
 import { Injectable, BadRequestException, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes } from 'node:crypto';
+import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
 import { TWILIO_CLIENT } from '../twilio/twilio.module';
 import type { TwilioClient } from '../twilio/twilio.module';
 
@@ -19,6 +21,8 @@ export class AuthService {
   constructor(
     @Inject(TWILIO_CLIENT) private readonly twilio: TwilioClient,
     private readonly config: ConfigService,
+    private readonly jwt: JwtService,
+    private readonly users: UsersService,
   ) {}
 
   /** Accepts +91XXXXXXXXXX or 10-digit Indian mobile and returns E.164 (+91XXXXXXXXXX). */
@@ -121,7 +125,14 @@ export class AuthService {
       throw new BadRequestException('Invalid OTP');
     }
 
+    // ✅ OTP verified — clean up
     this.store.delete(key);
-    return { success: true, message: 'OTP verified' };
+
+    // ✅ Create/find user + sign JWT
+    const user = this.users.findOrCreateByPhone(key);
+    const payload = { sub: user.id, phone: user.phone };
+    const access_token = await this.jwt.signAsync(payload);
+
+    return { success: true, message: 'OTP verified', access_token };
   }
 }
