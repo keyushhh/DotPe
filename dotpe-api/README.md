@@ -17,6 +17,7 @@ It supports sending OTPs via **SMS** using [Twilio](https://www.twilio.com/), an
 - 📩 Send OTP to phone numbers (via Twilio SMS)
 - ✅ Verify OTP codes
 - 🛡️ Rate limiting to prevent abuse
+- 🔐 Hashes OTP codes before storing them in memory
 - ⚡ Built with **NestJS**, **TypeScript**, **pnpm**
 - 🔒 Environment variables managed with `.env`
 
@@ -47,6 +48,7 @@ Create a .env file in the root with:
 TWILIO_ACCOUNT_SID=your_twilio_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_PHONE_NUMBER=your_twilio_number
+OTP_HASH_SECRET=choose_a_long_random_string
 
 ## Project setup
 
@@ -72,36 +74,3 @@ Body: { "phone": "+91XXXXXXXXXX" }
 Verify OTP
 POST /auth/otp/verify
 Body: { "identifier": "+91XXXXXXXXXX", "code": "123456" }
-
-📌 Tech Stack
-
-NestJS
-Twilio
-TypeScript
-pnpm
-
-📖 License
-
-MIT — free to use & modify.
-Made with ❤️ for the DotPe project.
-
----
-
-### Step 3 — Save the file  
-
-Run the project (production build)
-pnpm run build
-pnpm run start:prod
-
----
-
-### Step 1 — Open `README.md` in VS Code.  
-### Step 2 — Replace the old “setup/run” with the above.  
-### Step 3 — Save, then commit & push:
-
-```powershell
-git add README.md
-git commit -m "docs: update setup instructions for dotpe-api folder"
-git push
-
-
