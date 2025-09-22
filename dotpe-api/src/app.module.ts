@@ -1,3 +1,4 @@
+import { RedisModule } from './redis/redis.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
@@ -18,6 +19,8 @@ import { APP_GUARD } from '@nestjs/core';
     // Feature modules
     AuthModule,
     UsersModule,
+RedisModule,
+
 
     // Global throttle: 60-second window, max 30 requests per IP
     ThrottlerModule.forRoot([
