@@ -1,58 +1,55 @@
 import { Injectable, BadRequestException, Inject } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createHmac, randomBytes } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
+import { ConfigService } from '@nestjs/config';
+import { createHmac, randomBytes, randomInt } from 'node:crypto';
 import { TWILIO_CLIENT } from '../twilio/twilio.module';
 import type { TwilioClient } from '../twilio/twilio.module';
+import Redis from 'ioredis';
 
 type OtpRecord = {
   codeHash: string;
   salt: string;
   expiresAt: number;
-  lastSentAt: number;
   attempts: number;
 };
 
 @Injectable()
 export class AuthService {
-  private store = new Map<string, OtpRecord>();
+  private redis: Redis;
 
   constructor(
-    @Inject(TWILIO_CLIENT) private readonly twilio: TwilioClient,
-    private readonly config: ConfigService,
+    private readonly usersService: UsersService,
     private readonly jwt: JwtService,
-    private readonly users: UsersService,
-  ) {}
-
-  /** Accepts +91XXXXXXXXXX or 10-digit Indian mobile and returns E.164 (+91XXXXXXXXXX). */
-  private normalizeToE164(value: string): string {
-    if (!value) throw new BadRequestException('Phone/identifier is required');
-
-    const trimmed = value.replace(/\s+/g, '');
-
-    // Already E.164 +91XXXXXXXXXX
-    if (/^\+91\d{10}$/.test(trimmed)) return trimmed;
-
-    // 10-digit Indian mobile -> prefix +91
-    if (/^[6-9]\d{9}$/.test(trimmed)) return `+91${trimmed}`;
-
-    // Fallback: generic E.164 (+XXXXXXXXXXX up to 15 digits)
-    if (/^\+\d{10,15}$/.test(trimmed)) return trimmed;
-
-    throw new BadRequestException('Invalid Indian phone number');
+    private readonly config: ConfigService,
+    // Twilio client injected via provider
+    @Inject(TWILIO_CLIENT) private readonly twilio: TwilioClient,
+  ) {
+    // 👇 create Redis connection directly
+    this.redis = new Redis(); // defaults to localhost:6379
   }
 
+  /** Normalize phone number to E.164 (+91XXXXXXXXXX). */
+  private normalizeToE164(value: string): string {
+    if (!value) throw new BadRequestException('Phone/identifier is required');
+    const trimmed = value.replace(/\s+/g, '');
+
+    if (/^\+91\d{10}$/.test(trimmed)) return trimmed;
+    if (/^[6-9]\d{9}$/.test(trimmed)) return `+91${trimmed}`;
+    if (/^\+\d{10,15}$/.test(trimmed)) return trimmed;
+
+    throw new BadRequestException('Invalid phone number');
+  }
+
+  /** Generate a cryptographically secure 6-digit OTP */
   private generateCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return randomInt(100000, 1000000).toString();
   }
 
   private getOtpSecret(): string {
     const secret = this.config.get<string>('OTP_HASH_SECRET');
     if (!secret) {
-      throw new Error(
-        'OTP_HASH_SECRET is not configured. Add it to your environment variables.',
-      );
+      throw new Error('OTP_HASH_SECRET is not configured. Add it to .env');
     }
     return secret;
   }
@@ -63,18 +60,16 @@ export class AuthService {
       .digest('hex');
   }
 
-  /** We keep the param name as `identifier`, but we normalize it to a phone for SMS. */
   async sendOtp(identifier: string) {
-    // Normalize once and use the normalized value for both Twilio and as the map key
     const to = this.normalizeToE164(identifier);
-    const key = to;
+    const key = `otp:${to}`;
 
     const now = Date.now();
-    const existing = this.store.get(key);
 
-    // 30s resend cooldown
-    if (existing && now - existing.lastSentAt < 30_000) {
-      const wait = 30 - Math.ceil((now - existing.lastSentAt) / 1000);
+    // cooldown check (30s)
+    const lastSentAt = await this.redis.get(`${key}:lastSentAt`);
+    if (lastSentAt && now - parseInt(lastSentAt, 10) < 30_000) {
+      const wait = 30 - Math.ceil((now - parseInt(lastSentAt, 10)) / 1000);
       throw new BadRequestException(
         `Please wait ${wait}s before requesting again`,
       );
@@ -84,36 +79,40 @@ export class AuthService {
     const salt = randomBytes(16).toString('hex');
     const codeHash = this.hashCode(code, salt);
 
-    // store only the hash (safer)
-    this.store.set(key, {
+    const record: OtpRecord = {
       codeHash,
       salt,
-      expiresAt: now + 5 * 60_000, // 5 minutes
-      lastSentAt: now,
+      expiresAt: now + 5 * 60_000, // 5 min
       attempts: 0,
-    });
+    };
 
-    // Send SMS via injected Twilio client
+    // save OTP record in Redis (5 min TTL)
+    await this.redis.set(key, JSON.stringify(record), 'PX', 5 * 60_000);
+    await this.redis.set(`${key}:lastSentAt`, now.toString(), 'PX', 30_000);
+
+    // send SMS
     await this.twilio.messages.create({
       body: `Your DotPe OTP is ${code}`,
       from: this.config.getOrThrow<string>('TWILIO_PHONE_NUMBER'),
-      to, // normalized E.164
+      to,
     });
 
     return { success: true, message: 'OTP sent via SMS', to };
   }
 
   async verifyOtp(identifier: string, code: string) {
-    // Use the same normalization so the map key matches what we used in sendOtp
-    const key = this.normalizeToE164(identifier);
+    const to = this.normalizeToE164(identifier);
+    const key = `otp:${to}`;
 
-    const rec = this.store.get(key);
-    if (!rec) {
-      throw new BadRequestException('No OTP requested for this identifier');
+    const data = await this.redis.get(key);
+    if (!data) {
+      throw new BadRequestException('No OTP requested or OTP expired');
     }
 
+    const rec: OtpRecord = JSON.parse(data);
+
     if (Date.now() > rec.expiresAt) {
-      this.store.delete(key);
+      await this.redis.del(key);
       throw new BadRequestException('OTP expired, request a new one');
     }
 
@@ -121,18 +120,32 @@ export class AuthService {
 
     const submittedHash = this.hashCode(code, rec.salt);
     if (rec.codeHash !== submittedHash) {
-      if (rec.attempts >= 5) this.store.delete(key);
+      if (rec.attempts >= 5) {
+        await this.redis.del(key);
+      } else {
+        await this.redis.set(
+          key,
+          JSON.stringify(rec),
+          'PX',
+          rec.expiresAt - Date.now(),
+        );
+      }
       throw new BadRequestException('Invalid OTP');
     }
 
-    // ✅ OTP verified — clean up
-    this.store.delete(key);
+    // ✅ OTP valid → delete from Redis
+    await this.redis.del(key);
 
-    // ✅ Create/find user + sign JWT
-    const user = this.users.findOrCreateByPhone(key);
+    // ✅ Find or create user
+    let user = await this.usersService.findByPhone(to);
+    if (!user) {
+      user = await this.usersService.create({ phone: to });
+    }
+
+    // ✅ Sign JWT token
     const payload = { sub: user.id, phone: user.phone };
-    const access_token = await this.jwt.signAsync(payload);
+    const token = await this.jwt.signAsync(payload);
 
-    return { success: true, message: 'OTP verified', access_token };
+    return { success: true, message: 'OTP verified', access_token: token };
   }
 }
